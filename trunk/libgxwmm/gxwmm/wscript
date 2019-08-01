@@ -41,7 +41,7 @@ def configure(conf):
     conf.check_tool('misc')
     if Options.options.generate_cpp_wrapper:
         conf.cfg_get_variable(package='glibmm-2.4', variable='gmmprocdir')
-        conf.cfg_get_variable(package='gtkmm-2.4', variable='gmmprocm4dir', prefix="GTK_")
+        conf.cfg_get_variable(package='gtkmm-3.0', variable='gmmprocm4dir', prefix="GTK_")
         conf.cfg_get_variable(package='atkmm-1.6', variable='gmmprocm4dir', prefix="ATK_")
         conf.cfg_get_variable(package='pangomm-1.4', variable='gmmprocm4dir', prefix="PANGO_")
         conf.env["USE_GENERATED_CPP"] = False
