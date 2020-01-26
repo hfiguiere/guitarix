@@ -1,7 +1,7 @@
 #! /usr/bin/env python
 # encoding: utf-8
 
-import os, wscript_helper
+import os
 
 csources = [ # generate .so files from c sources that can be loaded by guitarix
     # element = name or [name, [lib, ...]]
@@ -69,9 +69,36 @@ lib_sources = [ # put in static library linked with guitarix
     "bassboom.dsp",
     ]
 
+lib_sources_shared = [
+    'zita_rev1.dsp',
+    'vibe.cc',
+    'abgate.cc',
+    'ts9sim.dsp',
+    'aclipper.dsp',
+    'mxrdist.dsp',
+    'bossds1.dsp',
+    'flanger_gx.dsp',
+    'mbc.dsp',
+    'mbcs.dsp',
+    'mbd.dsp',
+    'mbe.dsp',
+    'mbdel.dsp',
+    'mbchor.dsp',
+    'reversedelay.cc',
+    'gcb_95.dsp',
+    'hfb.dsp',
+    'hogsfoot.dsp',
+    'lpbboost.dsp',
+    'rolandwah.dsp',
+    'metronome.cc',
+    ]
+
 def build(bld):
-    if bld.env['FAUST']:
-        arg, float_arg, double_arg = wscript_helper.get_faust_args(bld)
+    if not (bld.env.STANDALONE or bld.env.NEW_LADSPA):
+        return
+
+    if bld.env.FAUST:
+        arg, float_arg, double_arg = bld.get_faust_args()
         arg += ["--init-type=plugin-instance"]
         bld(name = "dsp2cc sharedlib",
             source = sources,
@@ -103,7 +130,7 @@ def build(bld):
     lib_csources = [v if isinstance(v, str) else v[0] for v in lib_csource_defs]
     lib_dict = dict([v for v in lib_csource_defs if not isinstance(v, str)])
     def run(task):
-        l = []
+        l = ['#include "gx_plugin.h"\n\nnamespace pluginlib {\n']
         for fname in lib_sources+lib_csources:
             name = os.path.splitext(fname)[0]
             if fname in lib_dict:
@@ -111,11 +138,8 @@ def build(bld):
                     l.append("namespace %s { PluginDef *%s(); }\n" % (name, pname))
             else:
                 l.append("namespace %s { PluginDef *plugin(); }\n" % name)
-        f = open(task.outputs[0].bldpath(task.env),"w")
-        f.write('#include "gx_plugin.h"\n\nnamespace pluginlib {\n')
-        f.write("".join(l))
-        f.write("}\n")
-        f.close()
+        l.append("}\n")
+        task.outputs[0].write("".join(l))
     bld(name = "pluginlib.h",
         source = "wscript",
         rule = run,
@@ -123,45 +147,50 @@ def build(bld):
         )
     bld.add_group()
     have_pluginlib = len(lib_sources) != 0
-    bld.env["HAVE_PLUGINLIB"] = have_pluginlib
+    bld.env.HAVE_PLUGINLIB = have_pluginlib
     incl = [".","../headers", "../gx_head/engine"]
-    if not bld.env['ZITA_RESAMPLER']:
+    if not bld.env.ZITA_RESAMPLER:
         incl.append('../zita-resampler-1.1.0')
     
     if have_pluginlib:
-        bld(features = ['cxx', 'cstaticlib'],
+        bld.stlib(
             includes = incl,
             source = [s.replace(".dsp",".cc") for s in lib_sources]+lib_csources,
-            uselib = ["EIGEN3"],
+            use = ["EIGEN3"],
             target = "plugins", # (also defines name of task)
             )
+    bld(name = 'shared_plugins',
+        features = 'cxx',
+        cxxflags = bld.env.CXXFLAGS_cxxshlib,
+        includes = incl,
+        source = [s.replace(".dsp",".cc") for s in lib_sources_shared],
+        use = ["EIGEN3"],
+        )
     for s in sources:
-        tsk = bld(name = "create plugin .so",
-            features = ['cxx', 'cshlib'],
-            type = 'cshlib',
+        tsk = bld.shlib(
+            name = "create plugin .so",
             cxxflags = ["-fvisibility=hidden"],
             includes = [".","../headers", "../gx_head/engine"],
             source = [s.replace(".dsp",".cc")],
             target = s.replace(".dsp",""),
             )
-        tsk.env['shlib_PATTERN'] = '%s.so'
+        tsk.env.cxxshlib_PATTERN = '%s.so'
     for s in csources:
         if not isinstance(s, str):
             uselib = s[1]
             s = s[0]
         else:
             uselib = []
-        tsk = bld(name = "create plugin .so",
-            features = ['cxx', 'cshlib'],
-            type = 'cshlib',
+        tsk = bld.shlib(
+            name = "create plugin .so",
             cxxflags = ["-fvisibility=hidden"],
             includes = ["../headers", "../gx_head/engine"],
             source = s,
             target = s.replace(".cc",""),
-            uselib = uselib,
+            use = uselib,
             install_path = None, # for now...
             )
-        tsk.env['shlib_PATTERN'] = '%s.so'
+        tsk.env.cxxshlib_PATTERN = '%s.so'
 
 def configure(conf):
     conf.check_cfg(package='eigen3', args='--cflags', uselib_store="EIGEN3", mandatory=1)

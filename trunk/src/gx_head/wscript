@@ -1,11 +1,12 @@
 #! /usr/bin/env python
 # encoding: utf-8
 
-import sys, wscript_helper
-import Task, Utils, Options, Logs, os, shutil
-from TaskGen import extension
+import sys
+from waflib import Task, Options, Logs
+from waflib.TaskGen import extension
+import os, shutil
 
-def set_options(opt):
+def options(opt):
     guitarix_prog = opt.add_option_group("Guitarix Program Options")
     guitarix_prog.add_option(
         '--no-avahi', action='store_const', default=False, const=True,
@@ -21,37 +22,33 @@ def configure(conf):
         conf.check_cfg(package='avahi-gobject', args='--cflags --libs', uselib_store='AVAHI_GOBJECT', mandatory=1)
         conf.check_cfg(package='avahi-glib', args='--cflags --libs', uselib_store='AVAHI_GLIB', mandatory=1)
         conf.check_cfg(package='avahi-client', args='--cflags --libs', uselib_store='AVAHI_CLIENT', mandatory=1)
+        conf.env.HAVE_AVAHI = 1
         conf.define("HAVE_AVAHI", 1)
     if not Options.options.no_bluez:
         conf.check_cfg(package='bluez', args='--cflags --libs', uselib_store='BLUEZ', mandatory=0)
 
 def gperf2cc(task):
-    out_c = task.outputs[0].bldpath(task.env)
-    out_h = task.outputs[1].bldpath(task.env)
-    basename = os.path.splitext(
-        os.path.basename(task.inputs[0].srcpath(task.env)))[0]
-    srcdir = task.inputs[0].parent.srcpath(task.env)
-    if task.env["HAVE_GPERF"]:
-        cmd = [task.proc,
-               task.inputs[0].srcpath(task.env),
-               out_c,
-               out_h,
-               ]
+    def generated(node):
+        name = node.name.replace('.','-generated.')
+        return node.parent.find_or_declare([name]).get_src().abspath()
+    if task.env.HAVE_GPERF:
+        # task.proc.bldpath() triggers bug in Waf 2.0.19 when logging is active
+        cmd = [task.proc.abspath()] + [n.bldpath() for n in task.inputs + task.outputs]
         Logs.debug("runner: system command -> %s" % cmd)
-        ret = Utils.exec_command(cmd, shell=False)
-        shutil.copy2(out_c, os.path.join(srcdir, basename+"-generated.cc"))
-        shutil.copy2(out_h, os.path.join(srcdir, basename+"-generated.h"))
+        ret = task.exec_command(cmd, shell=False)
+        for out in task.outputs:
+            shutil.copy2(out.abspath(), generated(out))
         return ret
     else:
-        shutil.copy2(os.path.join(srcdir, basename+"-generated.cc"), out_c)
-        shutil.copy2(os.path.join(srcdir, basename+"-generated.h"), out_h)
+        for out in task.outputs:
+            shutil.copy2(generated(out), out.abspath())
         return 0
 
-Task.task_type_from_func(
+Task.task_factory(
     'gperf',
     gperf2cc,
     color='BLUE',
-    before='cc cxx',
+    before='cxx',
     )
 
 @extension('.gperf_tmpl')
@@ -59,30 +56,36 @@ def process_gperf_tmpl(self, node):
     cc_node = node.change_ext('.cc')
     h_node = node.change_ext('.h')
     task = self.create_task('gperf', [node], [cc_node, h_node])
-    task.proc = "../tools/make_jsonrpc_methods"
-    self.bld.add_manual_dependency(node,self.bld.bldnode.find_resource(task.proc))
+    p = "tools/make_jsonrpc_methods"
+    task.proc = self.bld.srcnode.find_resource(p)
+    self.bld.add_manual_dependency(node, task.proc)
 
 def build(bld):
+    if not (bld.env.STANDALONE or bld.env.NEW_LADSPA):
+        return
+
+    sources_engine_shared = [
+        'engine/gx_json.cpp',
+        'engine/gx_faust_plugins.cpp',
+        'engine/gx_internal_plugins.cpp',
+        'engine/gx_engine_audio.cpp',
+        'engine/gx_paramtable.cpp',
+        'engine/gx_convolver.cpp',
+        'engine/gx_resampler.cpp',
+        'engine/gx_system.cpp',
+        'engine/gx_logging.cpp',
+        'engine/gx_pluginloader.cpp',
+        ]
     sources_engine = [
-        './engine/gx_logging.cpp',
-        './engine/gx_pluginloader.cpp',
         './engine/ladspaplugin.cpp',
         './engine/ladspaback.cpp',
         './engine/tunerswitcher.cpp',
         './engine/jsonrpc.cpp',
         './engine/gx_jack.cpp',
         './engine/gx_preset.cpp',
-        './engine/gx_json.cpp',
-        './engine/gx_faust_plugins.cpp',
-        './engine/gx_internal_plugins.cpp',
         './engine/gx_internal_ui_plugins.cpp',
         './engine/gx_midi_plugin.cpp',
-        './engine/gx_engine_audio.cpp',
-        './engine/gx_paramtable.cpp',
         './engine/gx_pitch_tracker.cpp',
-        './engine/gx_convolver.cpp',
-        './engine/gx_resampler.cpp',
-        './engine/gx_system.cpp',
         './engine/gx_engine.cpp',
         './engine/gx_engine_midi.cpp',
         './engine/jsonrpc_methods.gperf_tmpl',
@@ -153,46 +156,42 @@ def build(bld):
         './builder/gx_fullscreen.png',
         ]
 
-    if bld.env["HAVE_AVAHI"]:
+    incl = ['.','./engine','../..','..','../headers'] # need ".." for config.h
+
+    if bld.env.NEW_LADSPA:
+        bld(name = 'shared_engine',
+            features='cxx',
+            cxxflags = bld.env.CXXFLAGS_cxxshlib,
+            source = sources_engine_shared,
+            includes = incl,
+            use = ['GLIBMM','GIOMM','LILV','gxwmm_inc','ZITA_CONVOLVER','ZITA_RESAMPLER'],
+            )
+
+    if not bld.env.STANDALONE:
+        return
+
+    if bld.env.HAVE_AVAHI:
         sources_gui.append("gui/avahi_discover.cpp")
         sources_engine.append("engine/avahi_register.cpp")
-    sources = sources_engine + sources_gui
-    incl = ['.','./engine','../..','..','../headers','../../libgxwmm','../../libgxw'] # need ".." for config.h
-    libpath = []
-    lib = []
-    if sys.platform.startswith("linux"):
-        lib.append('dl')
+    sources = sources_engine + sources_engine_shared + sources_gui
     uselib = ['JACK', 'SNDFILE', 'GTHREAD', 'GMODULE_EXPORT', 'CURL',
-              'GTK2', 'GTKMM', 'GIOMM', 'FFTW3', 'LRDF', 'LILV', 'BOOST_SYSTEM','BOOST_IOSTREAMS']
-    if bld.env["HAVE_AVAHI"]:
+              'GTK2', 'GTKMM', 'GIOMM', 'FFTW3', 'LRDF', 'LILV', 'BOOST_SYSTEM','BOOST_IOSTREAMS',
+              'ZITA_CONVOLVER','ZITA_RESAMPLER']
+    if bld.env.HAVE_AVAHI:
         uselib += ['AVAHI_GOBJECT', 'AVAHI_GLIB', 'AVAHI_CLIENT']
-    if bld.env["HAVE_BLUEZ"]:
+    if bld.env.HAVE_BLUEZ:
         uselib.append('BLUEZ')
-    uselib_local = []
-    wscript_helper.add_zita_convolver(bld, uselib, sources, incl)
-    wscript_helper.add_zita_resampler(bld, uselib, sources, incl)
-    if bld.env["HAVE_PLUGINLIB"]:
-        uselib_local += ["plugins"]
-    if bld.env["GX_LIB_SHARED"]:
-        lib += ['gxwmm','gxw']
-        libpath += [bld.path.find_dir("../../libgxw/gxw").bldpath(bld.env),
-                    bld.path.find_dir("../../libgxwmm/gxwmm").bldpath(bld.env)]
-    else:
-        uselib_local += ['gxwmm','gxw']
-    ldscript = bld.path.find_resource('guitarix.lds')
-    mapfile = bld.path.find_or_declare("guitarix.map")
-    task = bld(features = 'cxx cprogram',
+    if bld.env.HAVE_PLUGINLIB:
+        uselib += ["plugins"]
+    uselib += ['gxwmm']
+    bld.program(
         includes = incl,
-        obj_ext  = '.o',
         source = sources,
-        lib = lib,
-        uselib = uselib,
-        uselib_local = uselib_local,
-        libpath = libpath,
-        target = bld.env['BIN_NAME'],
+        use = uselib,
+        target = bld.env.BIN_NAME,
         chmod = 0o755,
-        install_path = bld.env['BINDIR'],
-        ldflags = ['-Wl,%s,-Map,%s' % (ldscript.srcpath(),mapfile.bldpath(bld.env))],
+        install_path = bld.env.BINDIR,
+        ldscript = 'guitarix.lds',
+        mapfile = "guitarix.map",
         )
-    bld.add_manual_dependency(bld.path.find_or_declare(task.target), ldscript)
-    bld.install_files(bld.env['GX_BUILDER_DIR'], builder_files, chmod=0o644)
+    bld.install_files(bld.env.GX_BUILDER_DIR, builder_files, chmod=0o644)

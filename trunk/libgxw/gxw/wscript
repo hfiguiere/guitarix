@@ -1,24 +1,25 @@
 # -*- python -*-
 # -*- coding: utf-8 -*-
 
-import Logs, Utils, Configure, Options, os.path, shutil
+from waflib import Logs, Utils, Configure, Options
+import os.path, shutil
 
-def set_options(opt):
+def options(opt):
     pass
 
 def configure(conf):
-    if conf.env["GX_LIB_SHARED"] or conf.env["GXW_SHARED"]:
-        conf.check_tool("libtool")
+    pass
 
 def img2c(task):
-    sources = "../libgxw/resources.xml"
-    dst = "../libgxw/gximages.cc"
-    dstdir = task.outputs[0].bldpath(task.env)
+    src = task.inputs[0].bldpath()
+    dstnode = task.outputs[0]
+    dst = dstnode.abspath()
+    cpy = dstnode.parent.parent.get_src().abspath()
 
-    cmd = ("glib-compile-resources --sourcedir=../libgxw/icons/ --target=%s  --generate-source %s" % ( dst, sources))
+    cmd = ("glib-compile-resources --sourcedir=../libgxw/icons/ --target=%s  --generate-source %s" % (dst, src))
     Logs.debug("runner: system command -> %s" % cmd)
-    ret = Utils.exec_command(cmd, shell=True)
-    shutil.copy2(dst,dstdir)
+    ret = task.exec_command(cmd, shell=True)
+    shutil.copy2(dst,cpy)
     return ret
 
 def build_stock_images(bld):
@@ -42,6 +43,9 @@ def build_stock_images(bld):
     bld.add_group()
 
 def build(bld):
+    if not (bld.env.STANDALONE or bld.env.LV2GUI or bld.env.NEW_LADSPA):
+        return
+
     sources = [
         'gxinit.cpp',
         'drawingutils.cpp',
@@ -79,28 +83,28 @@ def build(bld):
     build_stock_images(bld)
     if bld.env["GX_LIB_STATIC"]:
         # static library
-        prog = bld(
-            features = ['cxx', 'cstaticlib'],
+        prog = bld.stlib(
             includes = ['.'],
-            #cxxflags = ['-fPIC'],
+            export_includes = ['..'],
             source = sources,
-            uselib = ['GTHREAD', 'GTK2'],
+            use = ['GTHREAD', 'GTK2'],
             target = 'gxw',
             chmod=0o755,
             )
     if bld.env["GX_LIB_SHARED"] or bld.env["GXW_SHARED"]:
         # shared library
-        prog = bld(
-            features = ['cxx', 'cshlib'],
+        prog = bld.shlib(
             includes = ['.'],
+            export_includes = ['..'],
             source = sources,
-            uselib = ['GTHREAD', 'GTK2'],
+            use = ['GTHREAD', 'GTK2'],
             target = 'gxw',
             chmod=0o755,
             )
         if bld.env["GX_LIB_SHARED"] or bld.env["GXW_SHARED_INSTALL"]:
-            prog.features.append('libtool')
             prog.type = 'cshlib'
             prog.vnum = "0.1"
         else:
             prog.install_path = None
+
+    bld(name='gxw_inc', export_includes=['..'])

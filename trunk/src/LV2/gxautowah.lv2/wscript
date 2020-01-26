@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
-import sys, os, TaskGen, ctypes
+import sys
 
 def configure(conf):
     pass
@@ -19,8 +19,7 @@ def build(bld):
     cxxflag =[]
     if not bld.env['OPT'] and bld.env['SSE2']:
         cxxflag = [ "-msse2", "-mfpmath=sse"]
-    lv2_effects = bld(
-        features='cxx cshlib ',
+    lv2_effects = bld.shlib(
         includes = incl,
         lib = lib,
         uselib = uselib,
@@ -32,29 +31,20 @@ def build(bld):
         install_path = '${LV2DIR}/%s' % bundle,
         chmod = 0o755,
         )
-    lv2_effects.env['shlib_PATTERN'] = '%s.so'
+    lv2_effects.env['cxxshlib_PATTERN'] = '%s.so'
 
     if bld.env['LV2GUI']:
-        uselib_local6 = []
         libpath6 = []
         lib6 = []
-        incl6 = ['../../../libgxwmm','../../../libgxw','../']
+        incl6 = ['../']
         if sys.platform.startswith("linux"):
             lib6.append('dl')
-        if bld.env["GX_LIB_SHARED"]:
-            lib6 += ['gxwmm','gxw']
-            libpath6 += [bld.path.find_dir("../../../libgxw/gxw").bldpath(bld.env),
-                        bld.path.find_dir("../../../libgxwmm/gxwmm").bldpath(bld.env)]
-        else:
-            uselib_local6 += ['gxwmm','gxw']
 
-        lv2_effetcs_gui = bld(
-            features='cxx cshlib ',
+        lv2_effetcs_gui = bld.shlib(
             includes = incl6,
             lib = lib6,
-            uselib = 'LV2CORE GTKMM',
             libpath = libpath6,
-            uselib_local = uselib_local6,
+            use = ['gxwmm','LV2CORE', 'GTKMM'],
             linkflags = '-Wl,-z,nodelete',
             defines  = ["LV2_GUI"],
             target   = 'gxautowah_gui',
@@ -62,7 +52,7 @@ def build(bld):
             install_path = '${LV2DIR}/%s' % bundle,
             chmod = 0o755,
             )
-        lv2_effetcs_gui.env['shlib_PATTERN'] = '%s.so'
+        lv2_effetcs_gui.env['cxxshlib_PATTERN'] = '%s.so'
 
 
     install_path = '${LV2DIR}/%s' % bundle,

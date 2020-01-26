@@ -50,7 +50,6 @@ gxstyle_files = [
     'rack_expand.png',
     'rack_shrink.png',
     'rack_preset.png',
-    'rack_preset.png',
     'insert.png',
     'hslider.png',
     'logo.png',
@@ -167,4 +166,5 @@ def configure(conf):
     pass
 
 def build(bld):
-    bld.install_files(bld.env['GX_STYLE_DIR'], gxstyle_files, chmod=0o644)
+    if bld.env.STANDALONE:
+        bld.install_files(bld.env.GX_STYLE_DIR, gxstyle_files, chmod=0o644)
